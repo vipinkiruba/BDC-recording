@@ -1,0 +1,133 @@
+report ZBDC_MM01_1
+       no standard page heading line-size 255.
+
+*include bdcrecx1.
+TYPES: BEGIN OF t_struct,
+         MAKTX TYPE MAKT-MAKTX,
+         MEINS TYPE MARA-MEINS,
+         MATKL TYPE MARA-MATKL,
+       END OF t_struct.
+
+*CREATE A INTERNAL TABLE AND WORK AREA FOR THAT
+DATA: it_t_struct TYPE TABLE OF t_struct,
+      wa_t_struct TYPE t_struct.
+
+DATA: filename TYPE string. "USED TO STORE THE PATH
+
+DATA: it_bdcdata TYPE TABLE OF bdcdata,
+      wa_bdcdata TYPE bdcdata.
+
+DATA: it_msg TYPE TABLE OF bdcmsgcoll,
+      wa_msg TYPE bdcmsgcoll.
+
+DATA: it_raw TYPE truxs_t_text_data. "USED TO STORE OUR RAW DATA
+
+PARAMETERS: p_file TYPE  rlgrap-filename. " rlgrap-filename IS USED TO STORE THE LOCATION
+
+*USED TO GET INTO THE SYSTEM TO FETCH THE DATA
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  CALL FUNCTION 'F4_FILENAME'
+    EXPORTING
+      program_name  = syst-cprog
+      dynpro_number = syst-dynnr
+      field_name    = 'P_FILE'
+    IMPORTING
+      file_name     = p_file. " AND STORE IT IN P_FILE
+  .
+  filename = p_file.
+
+*USED TO FETCH EVERY ROW AS RAW DATA INTO IT_RAW
+  START-OF-SELECTION.
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      filename = filename
+      filetype = 'ASC'
+    TABLES
+      data_tab = it_raw.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+*THEN WE NEED TO SEPERATE IT AS FIELDS AND STORE IT IN IT_T_STRUCT
+  CALL FUNCTION 'TEXT_CONVERT_TEX_TO_SAP'
+    EXPORTING
+      i_field_seperator    = ','
+      i_tab_raw_data       = it_raw
+    TABLES
+      i_tab_converted_data = it_t_struct
+    EXCEPTIONS
+      conversion_failed    = 1
+      OTHERS               = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+
+*start-of-selection.
+
+*perform open_group.
+
+loop at it_t_struct into wa_t_struct.
+
+perform bdc_dynpro      using 'SAPLMGMM' '0060'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'RMMG1-MTART'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '=ENTR'.
+perform bdc_field       using 'RMMG1-MBRSH'
+                              'C'.
+perform bdc_field       using 'RMMG1-MTART'
+                              'FGTR'.
+perform bdc_dynpro      using 'SAPLMGMM' '0070'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'MSICHTAUSW-DYTXT(01)'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '=ENTR'.
+perform bdc_field       using 'MSICHTAUSW-KZSEL(01)'
+                              'X'.
+perform bdc_dynpro      using 'SAPLMGMM' '4004'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '=BU'.
+perform bdc_field       using 'MAKT-MAKTX'
+                              wa_t_struct-maktx.
+perform bdc_field       using 'BDC_CURSOR'
+                              'MARA-MATKL'.
+perform bdc_field       using 'MARA-MEINS'
+                              wa_t_struct-meins.
+perform bdc_field       using 'MARA-MATKL'
+                              wa_t_struct-matkl.
+perform bdc_field       using 'MARA-MTPOS_MARA'
+                              'NORM'.
+*perform bdc_transaction using 'MM01'.
+call TRANSACTION 'MM01' using it_bdcdata
+      mode 'A'
+      UPDATE 'S'
+      MESSAGEs INTO IT_MSG.
+CLEAR: IT_BDCDATA , WA_BDCDATA.
+endloop.
+*perform close_group.
+
+cl_demo_output=>display( it_msg ).
+
+*----------------------------------------------------------------------*
+*        Start new screen                                              *
+*----------------------------------------------------------------------*
+FORM BDC_DYNPRO USING PROGRAM DYNPRO.
+  CLEAR wa_bdcdata.
+  wa_bdcdata-PROGRAM  = PROGRAM.
+  wa_bdcdata-DYNPRO   = DYNPRO.
+  wa_bdcdata-DYNBEGIN = 'X'.
+  APPEND wa_bdcdata TO IT_bdcdata.
+ENDFORM.
+
+*----------------------------------------------------------------------*
+*        Insert field                                                  *
+*----------------------------------------------------------------------*
+FORM BDC_FIELD USING FNAM FVAL.
+  IF FVAL <> SPACE.
+    CLEAR wa_bdcdata.
+    wa_bdcdata-FNAM = FNAM.
+    wa_bdcdata-FVAL = FVAL.
+    APPEND wa_bdcdata TO IT_bdcdata.
+  ENDIF.
+ENDFORM.
